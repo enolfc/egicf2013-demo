@@ -1,0 +1,9 @@
+#!/bin/sh
+#
+# simple contextualizer just writes
+# a motd
+# 
+
+while read line ; do
+   echo "$line" >> /etc/motd
+done
