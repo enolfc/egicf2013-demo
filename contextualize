@@ -4,6 +4,15 @@
 # a motd
 # 
 
+echo "" > /etc/motd
+echo "(_) |__   ___ _ __ ___| | ___  _   _  __| |" >>/etc/motd
+echo "| | '_ \\ / _ \\ '__/ __| |/ _ \\| | | |/ _\` |" >>/etc/motd
+echo "| | |_) |  __/ | | (__| | (_) | |_| | (_| |" >>/etc/motd
+echo "|_|_.__/ \___|_|  \___|_|\\___/ \\__,_|\\__,_|" >>/etc/motd
+echo '///////////////////////// Contextualized VM' >> /etc/motd
+echo "" >> /etc/motd
+
 while read line ; do
-   echo "$line" >> /etc/motd
+    echo "$line" >> /etc/motd
 done
+echo "$line" >> /etc/motd
