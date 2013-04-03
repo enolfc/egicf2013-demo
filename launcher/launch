@@ -1,0 +1,157 @@
+import json
+import re
+import requests
+import sys
+import time
+
+from common import keystone_auth, get_vo_info
+
+# Config
+MD_URI = 'https://cloud.ibergrid.eu:5000/data'
+CONTEXT_REPO = 'https://github.com/enolfc/egicf2013-demo.git'
+SSH_KEY_FILE = '/home/enol/.ssh/id_rsa.pub'
+
+SITE_INFO = {
+    'ifca': {
+        'uri': 'http://cloud.ifca.es:8787/',
+        'tpl': ['compute; '
+                'scheme="http://schemas.ogf.org/occi/infrastructure#"; '
+                'class="kind"',
+                'Debian_6.0_(Squeeze); '
+                'scheme="http://schemas.openstack.org/template/os#"; '
+                'class="mixin"',
+                'm1.tiny; '
+                'scheme="http://schemas.openstack.org/template/resource#"; '
+                'class="mixin"',
+                ]
+    },
+    'cesga': {
+        'uri': 'https://cloud.cesga.es:3202/',
+        'tpl': ['test19_egi_cesga_es_sl6;'
+                'scheme="http://my.occi.service/occi/infrastructure/os_tpl#";'
+                'class="mixin"',
+                'compute;'
+                'scheme="http://schemas.ogf.org/occi/infrastructure#";'
+                'class="kind"',
+                ]
+    },
+}
+
+
+def create_vm(occi_uri, vm_tpl, proxy, extra_headers=dict()):
+    headers = {'category': ','.join(vm_tpl)}
+    r = requests.post(occi_uri + "compute/",
+                      headers=dict(headers.items() + extra_headers.items()),
+                      cert=proxy,
+                      verify=False)
+    if r.status_code != 201:
+        print >> sys.stderr, "Unable to create machine..."
+        sys.exit(1)
+
+    if r.headers['location']:
+        return r.headers['location']
+    else:
+        for l in r.content.split('\n'):
+            if l.find('X-OCCI-Location:') != -1:
+                return l.split(':', 1)[1].strip()
+
+
+def create_metadata(md_uri, proxy, uuid, repo='', user_data='', ssh_key=''):
+    print "Creating metadata for uuid %s" % uuid
+    data = {"uuid": uuid,
+            "ssh-key": ssh_key,
+            "context-repo": repo,
+            "context-data": user_data,
+            }
+    r = requests.post(md_uri,
+                      headers={"content-type": "application/json",
+                               "accept": "application/json"},
+                      data=json.dumps(data),
+                      cert=proxy,
+                      verify=False)
+    if r.status_code != 200:
+        print >> sys.stderr, "Unable to create metadata!"
+        sys.exit(1)
+
+
+def get_vm_status_ip(vm_uri, proxy, extra_headers=dict()):
+    r = requests.get(vm_uri,
+                     headers=extra_headers,
+                     cert=proxy,
+                     verify=False)
+    if r.status_code != 200:
+        print >> sys.stderr, "Unable to get VM info !?"
+        sys.exit(1)
+    status = ''
+    ip = ''
+    for l in r.content.split('\n'):
+        if not status:
+            m = re.search(r'occi.compute.state="(\w+)"', l)
+            if m:
+                status = m.group(1)
+                continue
+        if not ip:
+            m = re.search(r'occi.networkinterface.address="([1-9.]+)"', l)
+            if m:
+                ip = m.group(1)
+        # dont continue parsing...
+        if ip and status:
+            break
+    return status, ip
+
+
+def wait_for_vm(vm_uri, proxy, extra_headers=dict()):
+    print "Waiting for VM to start",
+    status, ip = get_vm_status_ip(vm_uri, proxy, extra_headers)
+    while (status != 'active'):
+        print '.',
+        time.sleep(30)
+        status, ip = get_vm_status_ip(vm_uri, proxy, extra_headers)
+    print "\nVM is now ready at IP %s" % ip
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print >> sys.stderr, ("Expecting a site name " +
+                              "(%s)" % ','.join(SITE_INFO.keys()))
+        sys.exit(1)
+    try:
+        site_info = SITE_INFO[sys.argv[1].lower()]
+    except KeyError:
+        print >> sys.stderr, "Unknown site %s", sys.argv[1]
+
+    base_headers = {'content-type': 'text/occi',
+                    'accept': 'text/plain,text/occi'}
+    proxy, vo_name = get_vo_info()
+    # test simple connection to /-/
+    r = requests.get(site_info['uri'] + '/-/',
+                     headers=base_headers,
+                     cert=proxy,
+                     verify=False)
+    # if unauthorized, try keystone auth
+    if r.status_code == 401:
+        ks_uri = r.headers['www-authenticate'].split('=')[1].strip("\"'")
+        kid = keystone_auth(ks_uri, proxy, vo_name)
+        base_headers['X-Auth-Token'] = kid
+        # retry connection to OCCI
+        r = requests.get(site_info['uri'] + '/-/',
+                         headers=base_headers,
+                         cert=proxy,
+                         verify=False)
+        if r.status_code != 200:
+            print >> sys.stderr, "Still unable to connect to site!"
+            sys.exit(1)
+
+    # create VM
+    vm_uri = create_vm(site_info['uri'], site_info['tpl'], proxy, base_headers)
+    print "VM created with URI %s" % vm_uri
+
+    occi_uuid = vm_uri.split('/')[-1]
+
+    # create VM metadata
+    user_data = 'Hello from EGI CF 2013!'
+    ssh_key = open(SSH_KEY_FILE).read() + "\n"
+    create_metadata(MD_URI, proxy, occi_uuid, CONTEXT_REPO, user_data, ssh_key)
+
+    # wait for VM to be ready
+    wait_for_vm(vm_uri, proxy, base_headers)

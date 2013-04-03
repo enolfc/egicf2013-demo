@@ -1,0 +1,32 @@
+#
+#
+
+import requests
+import sys
+
+from common import keystone_auth, get_vo_info
+
+if len(sys.argv) != 2:
+    print >> sys.stderr, "Missing VM URI!"
+    sys.exit(1)
+
+vm_uri = sys.argv[1]
+proxy, vo_name = get_vo_info()
+r = requests.delete(vm_uri,
+                    cert=proxy,
+                    verify=False)
+if r.status_code == 401:
+    # Keystone!
+    ks_uri = r.headers['www-authenticate'].split('=')[1].strip("\"'")
+    kid = keystone_auth(ks_uri, proxy, vo_name)
+    r = requests.delete(vm_uri,
+                        headers={'x-auth-token': kid},
+                        cert=proxy,
+                        verify=False)
+if r.status_code == 200:
+    print "Succesfully deleted VM %s" % vm_uri
+else:
+    print "Something went wrong!?"
+    print r
+    print r.content
+    print r.headers
