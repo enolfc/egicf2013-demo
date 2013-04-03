@@ -2,7 +2,6 @@
 #
 # simple contextualizer just writes
 # a motd
-# 
 
 echo "" > /etc/motd
 echo "(_) |__   ___ _ __ ___| | ___  _   _  __| |" >>/etc/motd
