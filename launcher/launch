@@ -11,6 +11,7 @@ from common import keystone_auth, get_vo_info
 # Config
 MD_URI = 'https://cloud.ibergrid.eu:5000/data'
 CONTEXT_REPO = 'https://github.com/enolfc/egicf2013-demo.git'
+MSG = 'Hello from EGI 2013!'
 SSH_KEY_FILE = '/home/enol/.ssh/id_rsa.pub'
 
 SITE_INFO = {
@@ -19,7 +20,7 @@ SITE_INFO = {
         'tpl': ['compute; '
                 'scheme="http://schemas.ogf.org/occi/infrastructure#"; '
                 'class="kind"',
-                'Debian_6.0_(Squeeze); '
+                'Debian_EGI2013_Demo; '
                 'scheme="http://schemas.openstack.org/template/os#"; '
                 'class="mixin"',
                 'm1.tiny; '
@@ -48,6 +49,9 @@ def create_vm(occi_uri, vm_tpl, proxy, extra_headers=dict()):
                       verify=False)
     if r.status_code != 201:
         print >> sys.stderr, "Unable to create machine..."
+        print r.status_code
+        print r.headers
+        print r.content
         sys.exit(1)
 
     if r.headers['location']:
@@ -76,7 +80,25 @@ def create_metadata(md_uri, proxy, uuid, repo='', user_data='', ssh_key=''):
         sys.exit(1)
 
 
-def get_vm_status_ip(vm_uri, proxy, extra_headers=dict()):
+def get_vm_status(vm_uri, proxy, extra_headers=dict()):
+    r = requests.get(vm_uri,
+                     headers=extra_headers,
+                     cert=proxy,
+                     verify=False)
+    if r.status_code != 200:
+        print >> sys.stderr, "Unable to get VM info !?"
+        print r
+        print r.content
+        print r.headers
+        sys.exit(1)
+    for l in r.content.split('\n'):
+        m = re.search(r'occi.compute.state="(\w+)"', l)
+        if m:
+            return m.group(1)
+    return ''
+
+
+def get_vm_ip(vm_uri, proxy, extra_headers=dict()):
     r = requests.get(vm_uri,
                      headers=extra_headers,
                      cert=proxy,
@@ -84,31 +106,24 @@ def get_vm_status_ip(vm_uri, proxy, extra_headers=dict()):
     if r.status_code != 200:
         print >> sys.stderr, "Unable to get VM info !?"
         sys.exit(1)
-    status = ''
-    ip = ''
     for l in r.content.split('\n'):
-        if not status:
-            m = re.search(r'occi.compute.state="(\w+)"', l)
-            if m:
-                status = m.group(1)
-                continue
-        if not ip:
-            m = re.search(r'occi.networkinterface.address="([1-9.]+)"', l)
-            if m:
-                ip = m.group(1)
-        # dont continue parsing...
-        if ip and status:
-            break
-    return status, ip
+        m = re.search(r'occi.networkinterface.address="([1-9.]+)"', l)
+        if m:
+            return m.group(1)
+    return ''
 
 
 def wait_for_vm(vm_uri, proxy, extra_headers=dict()):
     print "Waiting for VM to start",
-    status, ip = get_vm_status_ip(vm_uri, proxy, extra_headers)
+    sys.stdout.flush()
+    status = get_vm_status(vm_uri, proxy, extra_headers)
     while (status != 'active'):
         print '.',
+        sys.stdout.flush()
         time.sleep(30)
-        status, ip = get_vm_status_ip(vm_uri, proxy, extra_headers)
+        status = get_vm_status(vm_uri, proxy, extra_headers)
+    time.sleep(2)
+    ip = get_vm_ip(vm_uri, proxy, extra_headers)
     print "\nVM is now ready at IP %s" % ip
 
 
@@ -145,14 +160,17 @@ if __name__ == '__main__':
             sys.exit(1)
 
     # create VM
-    vm_uri = create_vm(site_info['uri'], site_info['tpl'], proxy, base_headers)
+    vm_uri = create_vm(site_info['uri'],
+                       site_info['tpl'],
+                       proxy,
+                       base_headers)
     print "VM created with URI %s" % vm_uri
 
     occi_uuid = vm_uri.split('/')[-1]
 
     # create VM metadata
-    user_data = 'Hello from EGI CF 2013!'
-    ssh_key = open(SSH_KEY_FILE).read() + "\n"
+    user_data = MSG
+    ssh_key = open(SSH_KEY_FILE).read()
     create_metadata(MD_URI, proxy, occi_uuid, CONTEXT_REPO, user_data, ssh_key)
 
     # wait for VM to be ready
