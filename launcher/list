@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+
+import requests
+import sys
+
+from common import keystone_auth, get_vo_info
+
+if len(sys.argv) != 2:
+    print >> sys.stderr, "Missing site URI!"
+    sys.exit(1)
+
+site_uri = sys.argv[1]
+proxy, vo_name = get_vo_info()
+r = requests.get(site_uri + "compute/",
+                 cert=proxy,
+                 verify=False)
+if r.status_code == 401:
+    # Keystone!
+    ks_uri = r.headers['www-authenticate'].split('=')[1].strip("\"'")
+    kid = keystone_auth(ks_uri, proxy, vo_name)
+    r = requests.delete(site_uri + "compute/",
+                        headers={'x-auth-token': kid},
+                        cert=proxy,
+                        verify=False)
+if r.status_code != 200:
+    print "Something went wrong!?"
+    print r
+    print r.content
+    print r.headers
+    sys.exit(0)
+
+for l in r.content.split('\n'):
+    if l.lower().find('x-occi-location') != -1:
+        print l.split(':', 1)[-1].strip()
