@@ -9,17 +9,23 @@ if len(sys.argv) != 2:
     print >> sys.stderr, "Missing site URI!"
     sys.exit(1)
 
+
+base_headers = {'content-type': 'text/occi',
+                'accept': 'text/plain,text/occi'}
+
 site_uri = sys.argv[1]
 proxy, vo_name = get_vo_info()
 r = requests.get(site_uri + "compute/",
+                 headers=base_headers,
                  cert=proxy,
                  verify=False)
 if r.status_code == 401:
     # Keystone!
     ks_uri = r.headers['www-authenticate'].split('=')[1].strip("\"'")
     kid = keystone_auth(ks_uri, proxy, vo_name)
-    r = requests.delete(site_uri + "compute/",
-                        headers={'x-auth-token': kid},
+    base_headers['x-auth-token'] = kid
+    r = requests.get(site_uri + "compute/",
+                        headers=base_headers,
                         cert=proxy,
                         verify=False)
 if r.status_code != 200:
@@ -27,6 +33,7 @@ if r.status_code != 200:
     print r
     print r.content
     print r.headers
+    print r.request.headers
     sys.exit(0)
 
 for l in r.content.split('\n'):
