@@ -18,6 +18,7 @@ def get_vo_info():
     except subprocess.CalledProcessError:
         print >> sys.stderr, "Not able to get proxy info..."
         sys.exit(1)
+    print "Using proxy file at %s for VO %s" % (proxy, vo_name)
     return proxy, vo_name
 
 

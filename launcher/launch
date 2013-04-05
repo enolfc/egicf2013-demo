@@ -12,7 +12,7 @@ from common import keystone_auth, get_vo_info
 MD_URI = 'https://cloud.ibergrid.eu:5000/data'
 CONTEXT_REPO = 'https://github.com/enolfc/egicf2013-demo.git'
 MSG = 'Hello from EGI 2013!'
-SSH_KEY_FILE = '/home/enol/.ssh/id_rsa.pub'
+SSH_KEY_FILE = 'mykey.pub'
 
 SITE_INFO = {
     'ifca': {
@@ -20,13 +20,16 @@ SITE_INFO = {
         'tpl': ['compute; '
                 'scheme="http://schemas.ogf.org/occi/infrastructure#"; '
                 'class="kind"',
-                'Debian_EGI2013_Demo; '
+                '297a097c-88b3-4e53-9a24-132e2bc785b7; '
                 'scheme="http://schemas.openstack.org/template/os#"; '
                 'class="mixin"',
-                'm1.tiny; '
+                '1; '
                 'scheme="http://schemas.openstack.org/template/resource#"; '
                 'class="mixin"',
-                ]
+                '34; '
+                'scheme="http://schemas.openstack.org/infrastructure/security/group#"; '
+                'class="mixin"',
+                ],
     },
     'cesga': {
         'uri': 'https://cloud.cesga.es:3202/',
@@ -36,13 +39,17 @@ SITE_INFO = {
                 'compute;'
                 'scheme="http://schemas.ogf.org/occi/infrastructure#";'
                 'class="kind"',
-                ]
+                ],
     },
 }
 
 
 def create_vm(occi_uri, vm_tpl, proxy, extra_headers=dict()):
     headers = {'category': ','.join(vm_tpl)}
+    #if occi_uri == 'http://cloud.ifca.es:8787/':
+    #    headers['x-occi-attribute'] = ','.join(
+    #        ['org.openstack.credentials.publickey.name="enolkey"',
+    #         'org.openstack.credentials.publickey.data="' + open(SSH_KEY_FILE).read() + '"'])
     r = requests.post(occi_uri + "compute/",
                       headers=dict(headers.items() + extra_headers.items()),
                       cert=proxy,
@@ -52,6 +59,7 @@ def create_vm(occi_uri, vm_tpl, proxy, extra_headers=dict()):
         print r.status_code
         print r.headers
         print r.content
+        print r.request.headers
         sys.exit(1)
 
     if r.headers['location']:
@@ -117,18 +125,21 @@ def wait_for_vm(vm_uri, proxy, extra_headers=dict()):
     print "Waiting for VM to start",
     sys.stdout.flush()
     status = get_vm_status(vm_uri, proxy, extra_headers)
-    while (status != 'active'):
+    while status != 'active':
         print '.',
         sys.stdout.flush()
         time.sleep(30)
         status = get_vm_status(vm_uri, proxy, extra_headers)
     time.sleep(2)
     ip = get_vm_ip(vm_uri, proxy, extra_headers)
+    while not ip:
+        time.sleep(2)
+        ip = get_vm_ip(vm_uri, proxy, extra_headers)
     print "\nVM is now ready at IP %s" % ip
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print >> sys.stderr, ("Expecting a site name " +
                               "(%s)" % ','.join(SITE_INFO.keys()))
         sys.exit(1)
@@ -136,6 +147,10 @@ if __name__ == '__main__':
         site_info = SITE_INFO[sys.argv[1].lower()]
     except KeyError:
         print >> sys.stderr, "Unknown site %s", sys.argv[1]
+    if len(sys.argv) >= 3:
+        msg = ' '.join(sys.argv[2:])
+    else:
+        msg = MSG
 
     base_headers = {'content-type': 'text/occi',
                     'accept': 'text/plain,text/occi'}
@@ -157,6 +172,10 @@ if __name__ == '__main__':
                          verify=False)
         if r.status_code != 200:
             print >> sys.stderr, "Still unable to connect to site!"
+            print r
+            print r.headers
+            print r.request.headers
+            print r.content
             sys.exit(1)
 
     # create VM
@@ -169,7 +188,7 @@ if __name__ == '__main__':
     occi_uuid = vm_uri.split('/')[-1]
 
     # create VM metadata
-    user_data = MSG
+    user_data = msg
     ssh_key = open(SSH_KEY_FILE).read()
     create_metadata(MD_URI, proxy, occi_uuid, CONTEXT_REPO, user_data, ssh_key)
 
